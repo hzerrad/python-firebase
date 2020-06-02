@@ -82,13 +82,13 @@ Authentication in Firebase is nothing but to simply creating a token that confor
 
 ```python
 from firebase import firebase
-fb_app = firebase.FirebaseApplication('https://your_storage.firebaseio.com', authentication=None)
+fb_app = firebase.FirebaseApplication('https://your_storage.firebaseio.com', authenticator=None)
 result = fb_app.get('/users', None, {'print': 'pretty'})
 print result
 {'error': 'Permission denied.'}
 
 authentication = firebase.FirebaseAuthentication('THIS_IS_MY_SECRET', 'ozgurvt@gmail.com', extra={'id': 123})
-fb_app.authentication = authentication
+fb_app.__authenticator = authentication
 print authentication.extra
 {'admin': False, 'debug': False, 'email': 'ozgurvt@gmail.com', 'id': 123, 'provider': 'password'}
 
@@ -114,7 +114,7 @@ import json
 from firebase import firebase
 from firebase import jsonutil
 
-fb_app = firebase.FirebaseApplication('https://your_storage.firebaseio.com', authentication=None)
+fb_app = firebase.FirebaseApplication('https://your_storage.firebaseio.com', authenticator=None)
 
 def log_user(response):
     with open('/tmp/users/%s.json' % response.keys()[0], 'w') as users_file:

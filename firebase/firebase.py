@@ -7,177 +7,12 @@ except ImportError:
 import json
 
 from .firebase_authenticator import Authenticator
-from .decorators import http_connection
+from .sessions import Session
 
 from .multiprocess_pool import process_pool
 from .jsonutil import JSONEncoder
 
-__all__ = ['FirebaseAuthenticator', 'FirebaseApplication']
-
-
-@http_connection(60)
-def make_get_request(url, params, headers, connection):
-    """
-    Helper function that makes an HTTP GET request to the given firebase
-    endpoint. Timeout is 60 seconds.
-    `url`: The full URL of the firebase endpoint (DSN appended.)
-    `params`: Python dict that is appended to the URL like a querystring.
-    `headers`: Python dict. HTTP request headers.
-    `connection`: Predefined HTTP connection instance. If not given, it
-    is supplied by the `decorators.http_connection` function.
-
-    The returning value is a Python dict deserialized by the JSON decoder. However,
-    if the status code is not 2x or 403, an requests.HTTPError is raised.
-
-    connection = connection_pool.get_available_connection()
-    response = make_get_request('http://firebase.localhost/users', {'print': silent'},
-                                {'X_FIREBASE_SOMETHING': 'Hi'}, connection)
-    response => {'1': 'John Doe', '2': 'Jane Doe'}
-    """
-    timeout = getattr(connection, 'timeout')
-    response = connection.get(url, params=params, headers=headers, timeout=timeout)
-    if response.ok or response.status_code == 403:
-        return response.json() if response.content else None
-    else:
-        response.raise_for_status()
-
-
-@http_connection(60)
-def make_put_request(url, data, params, headers, connection):
-    """
-    Helper function that makes an HTTP PUT request to the given firebase
-    endpoint. Timeout is 60 seconds.
-    `url`: The full URL of the firebase endpoint (DSN appended.)
-    `data`: JSON serializable dict that will be stored in the remote storage.
-    `params`: Python dict that is appended to the URL like a querystring.
-    `headers`: Python dict. HTTP request headers.
-    `connection`: Predefined HTTP connection instance. If not given, it
-    is supplied by the `decorators.http_connection` function.
-
-    The returning value is a Python dict deserialized by the JSON decoder. However,
-    if the status code is not 2x or 403, an requests.HTTPError is raised.
-
-    connection = connection_pool.get_available_connection()
-    response = make_put_request('http://firebase.localhost/users',
-                                '{"1": "Ozgur Vatansever"}',
-                                {'X_FIREBASE_SOMETHING': 'Hi'}, connection)
-    response => {'1': 'Ozgur Vatansever'} or {'error': 'Permission denied.'}
-    """
-    timeout = getattr(connection, 'timeout')
-    response = connection.put(url, data=data, params=params, headers=headers,
-                              timeout=timeout)
-    if response.ok or response.status_code == 403:
-        return response.json() if response.content else None
-    else:
-        response.raise_for_status()
-
-
-@http_connection(60)
-def make_post_request(url, data, params, headers, connection):
-    """
-    Helper function that makes an HTTP POST request to the given firebase
-    endpoint. Timeout is 60 seconds.
-    `url`: The full URL of the firebase endpoint (DSN appended.)
-    `data`: JSON serializable dict that will be stored in the remote storage.
-    `params`: Python dict that is appended to the URL like a querystring.
-    `headers`: Python dict. HTTP request headers.
-    `connection`: Predefined HTTP connection instance. If not given, it
-    is supplied by the `decorators.http_connection` function.
-
-    The returning value is a Python dict deserialized by the JSON decoder. However,
-    if the status code is not 2x or 403, an requests.HTTPError is raised.
-
-    connection = connection_pool.get_available_connection()
-    response = make_put_request('http://firebase.localhost/users/',
-       '{"Ozgur Vatansever"}', {'X_FIREBASE_SOMETHING': 'Hi'}, connection)
-    response => {u'name': u'-Inw6zol_2f5ThHwVcSe'} or {'error': 'Permission denied.'}
-    """
-    timeout = getattr(connection, 'timeout')
-    response = connection.post(url, data=data, params=params, headers=headers,
-                               timeout=timeout)
-    if response.ok or response.status_code == 403:
-        return response.json() if response.content else None
-    else:
-        response.raise_for_status()
-
-
-@http_connection(60)
-def make_patch_request(url, data, params, headers, connection):
-    """
-    Helper function that makes an HTTP PATCH request to the given firebase
-    endpoint. Timeout is 60 seconds.
-    `url`: The full URL of the firebase endpoint (DSN appended.)
-    `data`: JSON serializable dict that will be stored in the remote storage.
-    `params`: Python dict that is appended to the URL like a querystring.
-    `headers`: Python dict. HTTP request headers.
-    `connection`: Predefined HTTP connection instance. If not given, it
-    is supplied by the `decorators.http_connection` function.
-
-    The returning value is a Python dict deserialized by the JSON decoder. However,
-    if the status code is not 2x or 403, an requests.HTTPError is raised.
-
-    connection = connection_pool.get_available_connection()
-    response = make_put_request('http://firebase.localhost/users/1',
-       '{"Ozgur Vatansever"}', {'X_FIREBASE_SOMETHING': 'Hi'}, connection)
-    response => {'Ozgur Vatansever'} or {'error': 'Permission denied.'}
-    """
-    timeout = getattr(connection, 'timeout')
-    response = connection.patch(url, data=data, params=params, headers=headers,
-                                timeout=timeout)
-    if response.ok or response.status_code == 403:
-        return response.json() if response.content else None
-    else:
-        response.raise_for_status()
-
-
-@http_connection(60)
-def make_delete_request(url, params, headers, connection):
-    """
-    Helper function that makes an HTTP DELETE request to the given firebase
-    endpoint. Timeout is 60 seconds.
-    `url`: The full URL of the firebase endpoint (DSN appended.)
-    `params`: Python dict that is appended to the URL like a querystring.
-    `headers`: Python dict. HTTP request headers.
-    `connection`: Predefined HTTP connection instance. If not given, it
-    is supplied by the `decorators.http_connection` function.
-
-    The returning value is NULL. However, if the status code is not 2x or 403,
-    an requests.HTTPError is raised.
-
-    connection = connection_pool.get_available_connection()
-    response = make_put_request('http://firebase.localhost/users/1',
-                                {'X_FIREBASE_SOMETHING': 'Hi'}, connection)
-    response => NULL or {'error': 'Permission denied.'}
-    """
-    timeout = getattr(connection, 'timeout')
-    response = connection.delete(url, params=params, headers=headers, timeout=timeout)
-    if response.ok or response.status_code == 403:
-        return response.json() if response.content else None
-    else:
-        response.raise_for_status()
-
-
-class FirebaseAuthenticator(object):
-
-    def __init__(self, apikey, email, password, signup_first=False):
-        self.__authenticator = Authenticator(apikey, email, password, signup_first=signup_first)
-        self.auth = self.__authenticator.authenticate()
-
-    @property
-    def idToken(self):
-        return self.auth.json()['idToken']
-
-    @property
-    def refreshToken(self):
-        return self.auth.json()['refreshToken']
-
-    @property
-    def localId(self):
-        return self.auth.json()['localId']
-
-    @property
-    def email(self):
-        return self.auth.json()['email']
+__all__ = ['FirebaseApplication']
 
 
 class FirebaseApplication(object):
@@ -214,10 +49,15 @@ class FirebaseApplication(object):
     NAME_EXTENSION = '.json'
     URL_SEPARATOR = '/'
 
-    def __init__(self, app_name, authentication=None):
+    def __init__(self, apikey, app_name, email=None, password=None, signup_first=False):
 
         self.dsn = "https://{}.firebaseio.com".format(app_name)
-        self.authentication = authentication
+        self.session = Session()
+        self.auth = False
+
+        if email is not None and password is not None:
+            self.__authenticator = Authenticator(apikey, email, password, self.session, signup_first)
+            self.auth = True
 
     def _build_endpoint_url(self, url, name=None):
         """
@@ -235,100 +75,123 @@ class FirebaseApplication(object):
         return '%s%s%s' % (urlparse.urljoin(self.dsn, url), name,
                            self.NAME_EXTENSION)
 
-    @http_connection(60)
-    def get(self, url, name, auth=False, params=None, headers=None, connection=None):
+    def get(self, url, name, auth=True, params=None, headers=None, connection=None):
         """
         Synchronous GET request.
         """
-        endpoint, params, headers = self.__prepare_request(url, name, auth, params, headers)
-        return make_get_request(endpoint, params, headers, connection=connection)
+        if self.auth is False:
+            auth = False
 
-    def get_async(self, url, name, auth=False, callback=None, params=None, headers=None):
+        endpoint, params, headers = self.__prepare_request(url, name, auth, params, headers)
+        return self.session.get(endpoint, params=params, headers=headers)
+
+    def get_async(self, url, name, auth=True, callback=None, params=None, headers=None):
         """
         Asynchronous GET request with the process pool.
         """
+        if self.auth is False:
+            auth = False
+
         args = self.__prepare_request(url, name, auth, params, headers)
 
-        process_pool.apply_async(make_get_request,
+        process_pool.apply_async(self.session.get,
                                  args=args, callback=callback)
 
-    @http_connection(60)
-    def put(self, url, name, data, auth=False, params=None, headers=None, connection=None):
+    def put(self, url, name, data, auth=True, params=None, headers=None, connection=None):
         """
         Synchronous PUT request. There will be no returning output from
         the server, because the request will be made with ``silent``
         parameter. ``data`` must be a JSONable value.
         """
+        if self.auth is False:
+            auth = False
+
         assert name, 'Snapshot name must be specified'
         endpoint, params, headers = self.__prepare_request(url, name, auth, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
-        return make_put_request(endpoint, data, params, headers,
-                                connection=connection)
 
-    def put_async(self, url, name, data, auth=False, callback=None, params=None, headers=None):
+        return self.session.put(endpoint, data=data, params=params, headers=headers)
+
+    def put_async(self, url, name, data, auth=True, callback=None, params=None, headers=None):
         """
         Asynchronous PUT request with the process pool.
         """
+        if self.auth is False:
+            auth = False
+
         endpoint, params, headers = self.__prepare_request(url, name, auth, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
-        process_pool.apply_async(make_put_request,
+        process_pool.apply_async(self.session.put,
                                  args=(endpoint, data, params, headers),
                                  callback=callback)
 
-    @http_connection(60)
-    def post(self, url, data, auth=False, params=None, headers=None, connection=None):
+    def post(self, url, data, auth=True, params=None, headers=None, connection=None):
         """
         Synchronous POST request. ``data`` must be a JSONable value.
         """
+        if self.auth is False:
+            auth = False
+
         endpoint, params, headers = self.__prepare_request(url, None, auth, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
-        return make_post_request(endpoint, data, params, headers,
-                                 connection=connection)
+        return self.session.post(endpoint, data=data, params=params, headers=headers)
 
-    def post_async(self, url, data, auth=False, callback=None, params=None, headers=None):
+    def post_async(self, url, data, auth=True, callback=None, params=None, headers=None):
         """
         Asynchronous POST request with the process pool.
         """
+        if self.auth is False:
+            auth = False
+
         endpoint, params, headers = self.__prepare_request(url, None, auth, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
-        process_pool.apply_async(make_post_request,
+        process_pool.apply_async(self.session.post,
                                  args=(endpoint, data, params, headers),
                                  callback=callback)
 
-    @http_connection(60)
-    def patch(self, url, data, auth=False, params=None, headers=None, connection=None):
+    def patch(self, url, data, auth=True, params=None, headers=None, connection=None):
         """
         Synchronous POST request. ``data`` must be a JSONable value.
         """
+        if self.auth is False:
+            auth = False
+
         endpoint, params, headers = self.__prepare_request(url, None, auth, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
-        return make_patch_request(endpoint, data, params, headers,
-                                  connection=connection)
+        return self.session.patch(endpoint, data=data, params=params, headers=headers)
 
-    def patch_async(self, url, data, auth=False, callback=None, params=None, headers=None):
+    def patch_async(self, url, data, auth=True, callback=None, params=None, headers=None):
         """
         Asynchronous PATCH request with the process pool.
         """
+        if self.auth is False:
+            auth = False
+
         endpoint, params, headers = self.__prepare_request(url, None, auth, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
-        process_pool.apply_async(make_patch_request,
+        process_pool.apply_async(self.session.patch,
                                  args=(endpoint, data, params, headers),
                                  callback=callback)
 
-    @http_connection(60)
-    def delete(self, url, name, auth=False, params=None, headers=None, connection=None):
+    def delete(self, url, name, auth=True, params=None, headers=None, connection=None):
         """
         Synchronous DELETE request. ``data`` must be a JSONable value.
         """
-        endpoint, params, headers = self.__prepare_request(url, name, auth, params, headers)
-        return make_delete_request(endpoint, params, headers, connection=connection)
+        if self.auth is False:
+            auth = False
 
-    def delete_async(self, url, name, auth=False, callback=None, params=None, headers=None):
+        endpoint, params, headers = self.__prepare_request(url, name, auth, params, headers)
+        return self.session.delete(endpoint, params=params, headers=headers, connection=connection)
+
+    def delete_async(self, url, name, auth=True, callback=None, params=None, headers=None):
         """
         Asynchronous DELETE request with the process pool.
         """
+        if self.auth is False:
+            auth = False
+
         args = self.__prepare_request(url, name, auth, params, headers)
-        process_pool.apply_async(make_delete_request,
+        process_pool.apply_async(self.session.delete,
                                  args=args, callback=callback)
 
     def __prepare_request(self, url, name, auth, params, headers):
@@ -339,8 +202,8 @@ class FirebaseApplication(object):
             name = ''
         params = params or {}
         if auth:
-            assert self.authentication is not None, "NO_AUTH"
-            params['auth'] = self.authentication.idToken
+            assert self.__authenticator is not None, "NO_AUTH"
+            params['auth'] = self.__authenticator.idToken
         headers = headers or {}
         endpoint = self._build_endpoint_url(url, name)
 
