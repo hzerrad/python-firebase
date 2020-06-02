@@ -1,18 +1,18 @@
 try:
     import urlparse
 except ImportError:
-    #py3k
+    # py3k
     from urllib import parse as urlparse
 
 import json
 
-from .firebase_token_generator import FirebaseTokenGenerator
+from .firebase_authenticator import Authenticator
 from .decorators import http_connection
 
 from .multiprocess_pool import process_pool
 from .jsonutil import JSONEncoder
 
-__all__ = ['FirebaseAuthentication', 'FirebaseApplication']
+__all__ = ['FirebaseAuthenticator', 'FirebaseApplication']
 
 
 @http_connection(60)
@@ -157,42 +157,27 @@ def make_delete_request(url, params, headers, connection):
         response.raise_for_status()
 
 
-class FirebaseUser(object):
-    """
-    Class that wraps the credentials of the authenticated user. Think of
-    this as a container that holds authentication related data.
-    """
-    def __init__(self, email, firebase_auth_token, provider, id=None):
-        self.email = email
-        self.firebase_auth_token = firebase_auth_token
-        self.provider = provider
-        self.id = id
+class FirebaseAuthenticator(object):
 
+    def __init__(self, apikey, email, password, signup_first=False):
+        self.__authenticator = Authenticator(apikey, email, password, signup_first=signup_first)
+        self.auth = self.__authenticator.authenticate()
 
-class FirebaseAuthentication(object):
-    """
-    Class that wraps the Firebase SimpleLogin mechanism. Actually this
-    class does not trigger a connection, simply fakes the auth action.
+    @property
+    def idToken(self):
+        return self.auth.json()['idToken']
 
-    In addition, the provided email and password information is totally
-    useless and they never appear in the ``auth`` variable at the server.
-    """
-    def __init__(self, secret, email, debug=False, admin=False, extra=None):
-        self.authenticator = FirebaseTokenGenerator(secret, debug, admin)
-        self.email = email
-        self.provider = 'password'
-        self.extra = (extra or {}).copy()
-        self.extra.update({'debug': debug, 'admin': admin,
-                           'email': self.email, 'provider': self.provider})
+    @property
+    def refreshToken(self):
+        return self.auth.json()['refreshToken']
 
-    def get_user(self):
-        """
-        Method that gets the authenticated user. The returning user has
-        the token, email and the provider data.
-        """
-        token = self.authenticator.create_token(self.extra)
-        user_id = self.extra.get('id')
-        return FirebaseUser(self.email, token, self.provider, user_id)
+    @property
+    def localId(self):
+        return self.auth.json()['localId']
+
+    @property
+    def email(self):
+        return self.auth.json()['email']
 
 
 class FirebaseApplication(object):
@@ -208,12 +193,16 @@ class FirebaseApplication(object):
     The async calls make use of the on-demand process pool defined under the
     module `async`.
 
-    auth = FirebaseAuthentication(FIREBASE_SECRET, 'firebase@firebase.com', 'fbpw')
+    auth = FirebaseAuthenticator(API_TOKEN, 'firebase@firebase.com', 'firebase_password')
     firebase = FirebaseApplication('https://firebase.localhost', auth)
 
     That's all there is. Then you start connecting with the backend:
 
-    json_dict = firebase.get('/users', '1', {'print': 'pretty'})
+    By default, authenticating the request is optional. To send the authentication
+    token with your requests, set auth=true
+
+    example:
+    json_dict = firebase.get('/users', '1', {'print': 'pretty'}, auth=True)
     print json_dict
     {'1': 'John Doe', '2': 'Jane Doe', ...}
 
@@ -223,11 +212,11 @@ class FirebaseApplication(object):
     The callback method is fed with the returning response.
     """
     NAME_EXTENSION = '.json'
-    URL_SEPERATOR = '/'
+    URL_SEPARATOR = '/'
 
-    def __init__(self, dsn, authentication=None):
-        assert dsn.startswith('https://'), 'DSN must be a secure URL'
-        self.dsn = dsn
+    def __init__(self, app_name, authentication=None):
+
+        self.dsn = "https://{}.firebaseio.com".format(app_name)
         self.authentication = authentication
 
     def _build_endpoint_url(self, url, name=None):
@@ -239,154 +228,120 @@ class FirebaseApplication(object):
         full_url = _build_endpoint_url('/users', '1')
         full_url => 'http://firebase.localhost/users/1.json'
         """
-        if not url.endswith(self.URL_SEPERATOR):
-            url = url + self.URL_SEPERATOR
+        if not url.endswith(self.URL_SEPARATOR):
+            url = url + self.URL_SEPARATOR
         if name is None:
             name = ''
         return '%s%s%s' % (urlparse.urljoin(self.dsn, url), name,
                            self.NAME_EXTENSION)
 
-    def _authenticate(self, params, headers):
-        """
-        Method that simply adjusts authentication credentials for the
-        request.
-        `params` is the querystring of the request.
-        `headers` is the header of the request.
-
-        If auth instance is not provided to this class, this method simply
-        returns without doing anything.
-        """
-        if self.authentication:
-            user = self.authentication.get_user()
-            params.update({'auth_token': user.firebase_auth_token})
-            headers.update(self.authentication.authenticator.HEADERS)
-
     @http_connection(60)
-    def get(self, url, name, params=None, headers=None, connection=None):
+    def get(self, url, name, auth=False, params=None, headers=None, connection=None):
         """
         Synchronous GET request.
         """
-        if name is None: name = ''
-        params = params or {}
-        headers = headers or {}
-        endpoint = self._build_endpoint_url(url, name)
-        self._authenticate(params, headers)
+        endpoint, params, headers = self.__prepare_request(url, name, auth, params, headers)
         return make_get_request(endpoint, params, headers, connection=connection)
 
-    def get_async(self, url, name, callback=None, params=None, headers=None):
+    def get_async(self, url, name, auth=False, callback=None, params=None, headers=None):
         """
         Asynchronous GET request with the process pool.
         """
-        if name is None: name = ''
-        params = params or {}
-        headers = headers or {}
-        endpoint = self._build_endpoint_url(url, name)
-        self._authenticate(params, headers)
+        args = self.__prepare_request(url, name, auth, params, headers)
+
         process_pool.apply_async(make_get_request,
-            args=(endpoint, params, headers), callback=callback)
+                                 args=args, callback=callback)
 
     @http_connection(60)
-    def put(self, url, name, data, params=None, headers=None, connection=None):
+    def put(self, url, name, data, auth=False, params=None, headers=None, connection=None):
         """
         Synchronous PUT request. There will be no returning output from
         the server, because the request will be made with ``silent``
         parameter. ``data`` must be a JSONable value.
         """
         assert name, 'Snapshot name must be specified'
-        params = params or {}
-        headers = headers or {}
-        endpoint = self._build_endpoint_url(url, name)
-        self._authenticate(params, headers)
+        endpoint, params, headers = self.__prepare_request(url, name, auth, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
         return make_put_request(endpoint, data, params, headers,
                                 connection=connection)
 
-    def put_async(self, url, name, data, callback=None, params=None, headers=None):
+    def put_async(self, url, name, data, auth=False, callback=None, params=None, headers=None):
         """
         Asynchronous PUT request with the process pool.
         """
-        if name is None: name = ''
-        params = params or {}
-        headers = headers or {}
-        endpoint = self._build_endpoint_url(url, name)
-        self._authenticate(params, headers)
+        endpoint, params, headers = self.__prepare_request(url, name, auth, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
         process_pool.apply_async(make_put_request,
                                  args=(endpoint, data, params, headers),
                                  callback=callback)
 
     @http_connection(60)
-    def post(self, url, data, params=None, headers=None, connection=None):
+    def post(self, url, data, auth=False, params=None, headers=None, connection=None):
         """
         Synchronous POST request. ``data`` must be a JSONable value.
         """
-        params = params or {}
-        headers = headers or {}
-        endpoint = self._build_endpoint_url(url, None)
-        self._authenticate(params, headers)
+        endpoint, params, headers = self.__prepare_request(url, None, auth, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
         return make_post_request(endpoint, data, params, headers,
                                  connection=connection)
 
-    def post_async(self, url, data, callback=None, params=None, headers=None):
+    def post_async(self, url, data, auth=False, callback=None, params=None, headers=None):
         """
         Asynchronous POST request with the process pool.
         """
-        params = params or {}
-        headers = headers or {}
-        endpoint = self._build_endpoint_url(url, None)
-        self._authenticate(params, headers)
+        endpoint, params, headers = self.__prepare_request(url, None, auth, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
         process_pool.apply_async(make_post_request,
                                  args=(endpoint, data, params, headers),
                                  callback=callback)
 
     @http_connection(60)
-    def patch(self, url, data, params=None, headers=None, connection=None):
+    def patch(self, url, data, auth=False, params=None, headers=None, connection=None):
         """
         Synchronous POST request. ``data`` must be a JSONable value.
         """
-        params = params or {}
-        headers = headers or {}
-        endpoint = self._build_endpoint_url(url, None)
-        self._authenticate(params, headers)
+        endpoint, params, headers = self.__prepare_request(url, None, auth, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
         return make_patch_request(endpoint, data, params, headers,
                                   connection=connection)
 
-    def patch_async(self, url, data, callback=None, params=None, headers=None):
+    def patch_async(self, url, data, auth=False, callback=None, params=None, headers=None):
         """
         Asynchronous PATCH request with the process pool.
         """
-        params = params or {}
-        headers = headers or {}
-        endpoint = self._build_endpoint_url(url, None)
-        self._authenticate(params, headers)
+        endpoint, params, headers = self.__prepare_request(url, None, auth, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
         process_pool.apply_async(make_patch_request,
                                  args=(endpoint, data, params, headers),
                                  callback=callback)
 
     @http_connection(60)
-    def delete(self, url, name, params=None, headers=None, connection=None):
+    def delete(self, url, name, auth=False, params=None, headers=None, connection=None):
         """
         Synchronous DELETE request. ``data`` must be a JSONable value.
         """
-        if not name: name = ''
-        params = params or {}
-        headers = headers or {}
-        endpoint = self._build_endpoint_url(url, name)
-        self._authenticate(params, headers)
+        endpoint, params, headers = self.__prepare_request(url, name, auth, params, headers)
         return make_delete_request(endpoint, params, headers, connection=connection)
 
-    def delete_async(self, url, name, callback=None, params=None, headers=None):
+    def delete_async(self, url, name, auth=False, callback=None, params=None, headers=None):
         """
         Asynchronous DELETE request with the process pool.
         """
-        if not name: name = ''
+        args = self.__prepare_request(url, name, auth, params, headers)
+        process_pool.apply_async(make_delete_request,
+                                 args=args, callback=callback)
+
+    def __prepare_request(self, url, name, auth, params, headers):
+        """
+        Prepare the request's url, headers and query strings.
+        """
+        if not name:
+            name = ''
         params = params or {}
+        if auth:
+            assert self.authentication is not None, "NO_AUTH"
+            params['auth'] = self.authentication.idToken
         headers = headers or {}
         endpoint = self._build_endpoint_url(url, name)
-        self._authenticate(params, headers)
-        process_pool.apply_async(make_delete_request,
-                    args=(endpoint, params, headers), callback=callback)
+
+        return endpoint, params, headers
