@@ -1,36 +1,43 @@
-
 class LazyLoadProxy(object):
     # Taken from http://code.activestate.com/recipes/496741-object-proxying/
     __slots__ = ["_obj_fn", "__weakref__", "__proxy_storage"]
+
     def __init__(self, fn, storage=None):
         object.__setattr__(self, "_obj_fn", fn)
         object.__setattr__(self, "__proxy_storage", storage)
 
     def __getattribute__(self, name):
         return getattr(object.__getattribute__(self, "_obj_fn")(), name)
+
     def __delattr__(self, name):
         delattr(object.__getattribute__(self, "_obj_fn")(), name)
+
     def __setattr__(self, name, value):
         setattr(object.__getattribute__(self, "_obj_fn")(), name, value)
+
     def __getitem__(self, index):
         return object.__getattribute__(self, "_obj_fn")().__getitem__(index)
+
     def __nonzero__(self):
         return bool(object.__getattribute__(self, "_obj_fn")())
+
     def __str__(self):
         return str(object.__getattribute__(self, "_obj_fn")())
+
     def __repr__(self):
         return repr(object.__getattribute__(self, "_obj_fn")())
+
     def __len__(self):
         return len(object.__getattribute__(self, "_obj_fn")())
 
     _special_names = [
         '__abs__', '__add__', '__and__', '__call__', '__cmp__', '__coerce__',
         '__contains__', '__delitem__', '__delslice__', '__div__', '__divmod__',
-        '__eq__', '__float__', '__floordiv__', '__ge__', #'__getitem__',
+        '__eq__', '__float__', '__floordiv__', '__ge__',  # '__getitem__',
         '__getslice__', '__gt__', '__hash__', '__hex__', '__iadd__', '__iand__',
         '__idiv__', '__idivmod__', '__ifloordiv__', '__ilshift__', '__imod__',
         '__imul__', '__int__', '__invert__', '__ior__', '__ipow__', '__irshift__',
-        '__isub__', '__iter__', '__itruediv__', '__ixor__', '__le__', #'__len__',
+        '__isub__', '__iter__', '__itruediv__', '__ixor__', '__le__',  # '__len__',
         '__long__', '__lshift__', '__lt__', '__mod__', '__mul__', '__ne__',
         '__neg__', '__oct__', '__or__', '__pos__', '__pow__', '__radd__',
         '__rand__', '__rdiv__', '__rdivmod__', '__reduce__', '__reduce_ex__',
@@ -48,6 +55,7 @@ class LazyLoadProxy(object):
             def method(self, *args, **kw):
                 return getattr(object.__getattribute__(self, "_obj_fn")(), name)(
                     *args, **kw)
+
             return method
 
         namespace = {}
