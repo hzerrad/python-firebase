@@ -1,6 +1,12 @@
-class Authenticator:
+import requests
+from requests.auth import AuthBase
+import time
+
+
+class Authenticator(requests.Session):
     """
-    Helper class that implements basic email/password Firebase authentication.
+    Helper class that extends requests.Session to
+    implements basic email/password Firebase authentication.
 
     Static Variables:
     -----------------
@@ -17,21 +23,78 @@ class Authenticator:
 
     PROVIDERS_ENDPOINT = 'https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key='
 
-    def __init__(self, apikey, email, password, session, signup_first=False):
-        # identity
+    def __init__(self, apikey, email, password, signup_first=False, timeout=60):
+        # Session
+        super(Authenticator, self).__init__()
+        self.timeout = timeout
+        self.headers.update({'Content-type': 'application/json'})
+        self.token_expiry = None
+
+        # User Info
         self.apikey = apikey
         self.localId = None
         self.email = email
         self.__password = password
         self.__signup_first = signup_first
 
-        # Session
-        self.__session = session
+        # Tokens
         self.idToken = None
-        self.refreshToken = None
+        self.__refreshToken = None
 
         # authenticate
         self.__authenticate()
+
+    def set_timeout(self, timeout):
+        self.timeout = timeout
+
+    def update_token_ttl(self):
+        self.token_expiry = time.time() + 3600
+
+    # Override
+    def get(self, url, **kwargs):
+        if time.time() > self.token_expiry:
+            self.__refresh()
+            kwargs['auth'] = FireAuth(self.idToken)
+            return super(Authenticator, self).get(url, **kwargs)
+
+        else:
+            return super(Authenticator, self).get(url, **kwargs)
+
+    # Override
+    def post(self, url, data=None, json=None, **kwargs):
+        if time.time() > self.token_expiry:
+            self.__refresh()
+            kwargs['auth'] = FireAuth(self.idToken)
+            return super(Authenticator, self).post(url, data, json, **kwargs)
+        else:
+            return super(Authenticator, self).post(url, data, json, **kwargs)
+
+    # Override
+    def put(self, url, data=None, **kwargs):
+        if time.time() > self.token_expiry:
+            self.__refresh()
+            kwargs['auth'] = FireAuth(self.idToken)
+            return super(Authenticator, self).put(url, data, **kwargs)
+        else:
+            return super(Authenticator, self).put(url, data, **kwargs)
+
+    # Override
+    def patch(self, url, data=None, **kwargs):
+        if time.time() > self.token_expiry:
+            self.__refresh()
+            kwargs['auth'] = FireAuth(self.idToken)
+            return super(Authenticator, self).patch(url, **kwargs)
+        else:
+            return super(Authenticator, self).patch(url, **kwargs)
+
+    # Override
+    def delete(self, url, **kwargs):
+        if time.time() > self.token_expiry:
+            self.__refresh()
+            kwargs['auth'] = FireAuth(self.idToken)
+            return super(Authenticator, self).delete(url, **kwargs)
+        else:
+            return super(Authenticator, self).delete(url, **kwargs)
 
     def __authenticate(self):
         """
@@ -53,7 +116,7 @@ class Authenticator:
             }
 
         self.__set_tokens_or_fail(
-            self.__session.post(Authenticator.SIGNIN_ENDPOINT + self.apikey, json=data)
+            super(Authenticator, self).post(Authenticator.SIGNIN_ENDPOINT + self.apikey, json=data)
         )
 
     def __signup(self):
@@ -74,26 +137,10 @@ class Authenticator:
         self.__signup_first = False
 
         self.__set_tokens_or_fail(
-            self.__session.post(Authenticator.SIGNUP_ENDPOINT + self.apikey, json=data)
+            super(Authenticator, self).post(Authenticator.SIGNUP_ENDPOINT + self.apikey, json=data)
         )
 
-    def __set_tokens_or_fail(self, response):
-        """
-        Sets idToken and refreshToken upon successful requests.
-
-        Parameters:
-            response: requests.Response
-            Response sent by Firebase servers.
-        """
-        if response.ok:
-            self.__session.update_token_ttl()
-            self.localId = response.json()['localId']
-            self.idToken = response.json()['idToken']
-            self.refreshToken = response.json()['refreshToken']
-        else:
-            response.raise_for_status()
-
-    def refresh(self, refresh_token):
+    def __refresh(self):
         """
             Exchange a refresh token for a new ID token.
                 - Sets `idToken` and `refreshToken` if ok
@@ -106,9 +153,38 @@ class Authenticator:
         """
         data = {
             'grant_type': 'refresh_token',
-            'refresh_token': refresh_token
+            'refresh_token': self.__refreshToken
         }
 
         self.__set_tokens_or_fail(
-            self.__session.post(Authenticator.REFRESH_ENDPOINT + self.apikey, json=data)
+            super(Authenticator, self).post(Authenticator.REFRESH_ENDPOINT + self.apikey, json=data)
         )
+
+    def __set_tokens_or_fail(self, response):
+        """
+        Sets idToken and refreshToken upon successful requests.
+
+        Parameters:
+            response: requests.Response
+            Response sent by Firebase servers.
+        """
+        if response.ok:
+            self.update_token_ttl()
+            self.localId = response.json()['localId']
+            self.idToken = response.json()['idToken']
+            self.__refreshToken = response.json()['refreshToken']
+        else:
+            response.raise_for_status()
+
+
+class FireAuth(AuthBase):
+    """
+        Injects the idToken into the request to authenticate it
+    """
+
+    def __init__(self, idToken):
+        self.__idToken = idToken
+
+    def __call__(self, r):
+        r.prepare_url(r.url, {"auth": self.__idToken})
+        return r

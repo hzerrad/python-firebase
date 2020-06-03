@@ -5,11 +5,12 @@ except ImportError:
     from urllib import parse as urlparse
 
 import json
+import threading
 
-from .firebase_authenticator import Authenticator
-from .sessions import Session
+from requests import Session
 
-from .multiprocess_pool import process_pool
+from .firebase_authenticator import Authenticator, FireAuth
+
 from .jsonutil import JSONEncoder
 
 __all__ = ['FirebaseApplication']
@@ -49,15 +50,14 @@ class FirebaseApplication(object):
     NAME_EXTENSION = '.json'
     URL_SEPARATOR = '/'
 
-    def __init__(self, apikey, app_name, email=None, password=None, signup_first=False):
+    def __init__(self, apikey, project_id, email=None, password=None, signup_first=False):
 
-        self.dsn = "https://{}.firebaseio.com".format(app_name)
-        self.session = Session()
-        self.auth = False
+        self.dsn = "https://{}.firebaseio.com".format(project_id)
 
         if email is not None and password is not None:
-            self.__authenticator = Authenticator(apikey, email, password, self.session, signup_first)
-            self.auth = True
+            self.session = Authenticator(apikey, email, password, signup_first)
+        else:
+            self.session = Session()
 
     def _build_endpoint_url(self, url, name=None):
         """
@@ -75,135 +75,101 @@ class FirebaseApplication(object):
         return '%s%s%s' % (urlparse.urljoin(self.dsn, url), name,
                            self.NAME_EXTENSION)
 
-    def get(self, url, name, auth=True, params=None, headers=None, connection=None):
+    def get(self, url, name, auth=True, params=None, headers=None):
         """
         Synchronous GET request.
         """
-        if self.auth is False:
-            auth = False
 
-        endpoint, params, headers = self.__prepare_request(url, name, auth, params, headers)
-        return self.session.get(endpoint, params=params, headers=headers)
+        fireauth = FireAuth(self.session.idToken) \
+            if auth and isinstance(self.session, Authenticator) \
+            else None
 
-    def get_async(self, url, name, auth=True, callback=None, params=None, headers=None):
-        """
-        Asynchronous GET request with the process pool.
-        """
-        if self.auth is False:
-            auth = False
+        endpoint, params, headers = self.__prepare_request(url, name, params, headers)
+        return self.session.get(endpoint, params=params, headers=headers, auth=fireauth)
 
-        args = self.__prepare_request(url, name, auth, params, headers)
-
-        process_pool.apply_async(self.session.get,
-                                 args=args, callback=callback)
-
-    def put(self, url, name, data, auth=True, params=None, headers=None, connection=None):
+    def put(self, url, name, data, auth=True, params=None, headers=None):
         """
         Synchronous PUT request. There will be no returning output from
         the server, because the request will be made with ``silent``
         parameter. ``data`` must be a JSONable value.
         """
-        if self.auth is False:
-            auth = False
-
         assert name, 'Snapshot name must be specified'
-        endpoint, params, headers = self.__prepare_request(url, name, auth, params, headers)
+
+        fireauth = FireAuth(self.session.idToken) \
+            if auth and isinstance(self.session, Authenticator) \
+            else None
+
+        endpoint, params, headers = self.__prepare_request(url, name, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
 
-        return self.session.put(endpoint, data=data, params=params, headers=headers)
+        return self.session.put(endpoint, data=data, params=params, headers=headers, auth=fireauth)
 
-    def put_async(self, url, name, data, auth=True, callback=None, params=None, headers=None):
-        """
-        Asynchronous PUT request with the process pool.
-        """
-        if self.auth is False:
-            auth = False
-
-        endpoint, params, headers = self.__prepare_request(url, name, auth, params, headers)
-        data = json.dumps(data, cls=JSONEncoder)
-        process_pool.apply_async(self.session.put,
-                                 args=(endpoint, data, params, headers),
-                                 callback=callback)
-
-    def post(self, url, data, auth=True, params=None, headers=None, connection=None):
+    def post(self, url, data, auth=True, params=None, headers=None):
         """
         Synchronous POST request. ``data`` must be a JSONable value.
         """
-        if self.auth is False:
-            auth = False
+        fireauth = FireAuth(self.session.idToken) \
+            if auth and isinstance(self.session, Authenticator) \
+            else None
 
-        endpoint, params, headers = self.__prepare_request(url, None, auth, params, headers)
+        endpoint, params, headers = self.__prepare_request(url, None, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
-        return self.session.post(endpoint, data=data, params=params, headers=headers)
+        return self.session.post(endpoint, data=data, params=params, headers=headers, auth=fireauth)
 
-    def post_async(self, url, data, auth=True, callback=None, params=None, headers=None):
-        """
-        Asynchronous POST request with the process pool.
-        """
-        if self.auth is False:
-            auth = False
-
-        endpoint, params, headers = self.__prepare_request(url, None, auth, params, headers)
-        data = json.dumps(data, cls=JSONEncoder)
-        process_pool.apply_async(self.session.post,
-                                 args=(endpoint, data, params, headers),
-                                 callback=callback)
-
-    def patch(self, url, data, auth=True, params=None, headers=None, connection=None):
+    def patch(self, url, data, auth=True, params=None, headers=None):
         """
         Synchronous POST request. ``data`` must be a JSONable value.
         """
-        if self.auth is False:
-            auth = False
+        fireauth = FireAuth(self.session.idToken) \
+            if auth and isinstance(self.session, Authenticator) \
+            else None
 
-        endpoint, params, headers = self.__prepare_request(url, None, auth, params, headers)
+        endpoint, params, headers = self.__prepare_request(url, None, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
-        return self.session.patch(endpoint, data=data, params=params, headers=headers)
+        return self.session.patch(endpoint, data=data, params=params, headers=headers, auth=fireauth)
 
-    def patch_async(self, url, data, auth=True, callback=None, params=None, headers=None):
-        """
-        Asynchronous PATCH request with the process pool.
-        """
-        if self.auth is False:
-            auth = False
-
-        endpoint, params, headers = self.__prepare_request(url, None, auth, params, headers)
-        data = json.dumps(data, cls=JSONEncoder)
-        process_pool.apply_async(self.session.patch,
-                                 args=(endpoint, data, params, headers),
-                                 callback=callback)
-
-    def delete(self, url, name, auth=True, params=None, headers=None, connection=None):
+    def delete(self, url, name, auth=True, params=None, headers=None):
         """
         Synchronous DELETE request. ``data`` must be a JSONable value.
         """
-        if self.auth is False:
-            auth = False
+        fireauth = FireAuth(self.session.idToken) \
+            if auth and isinstance(self.session, Authenticator) \
+            else None
 
-        endpoint, params, headers = self.__prepare_request(url, name, auth, params, headers)
-        return self.session.delete(endpoint, params=params, headers=headers, connection=connection)
+        endpoint, params, headers = self.__prepare_request(url, name, params, headers)
+        return self.session.delete(endpoint, params=params, headers=headers, auth=fireauth)
 
-    def delete_async(self, url, name, auth=True, callback=None, params=None, headers=None):
-        """
-        Asynchronous DELETE request with the process pool.
-        """
-        if self.auth is False:
-            auth = False
-
-        args = self.__prepare_request(url, name, auth, params, headers)
-        process_pool.apply_async(self.session.delete,
-                                 args=args, callback=callback)
-
-    def __prepare_request(self, url, name, auth, params, headers):
+    # == ASYNC == #
+    
+    def async_get(self, url, name, auth=True, params=None, headers=None):
+        thread = threading.Thread(target=self.get, args=(url, name, auth, params, headers))
+        thread.start()
+    
+    def async_put(self, url, name, data, auth=True, params=None, headers=None):
+        thread = threading.Thread(target=self.put, args=(url, name, data, auth, params, headers))
+        thread.start()
+    
+    def async_post(self, url, data, auth=True, params=None, headers=None):
+        thread = threading.Thread(target=self.post, args=(url, data, auth, params, headers))
+        thread.start()
+    
+    def async_patch(self, url, data, auth=True, params=None, headers=None):
+        thread = threading.Thread(target=self.patch, args=(url, data, auth, params, headers))
+        thread.start()
+    
+    def async_delete(self, url, name, auth=True, params=None, headers=None):
+        thread = threading.Thread(target=self.delete, args=(url, name, auth, params, headers))
+        thread.start()
+    
+    def __prepare_request(self, url, name, params, headers):
         """
         Prepare the request's url, headers and query strings.
         """
         if not name:
             name = ''
+
         params = params or {}
-        if auth:
-            assert self.__authenticator is not None, "NO_AUTH"
-            params['auth'] = self.__authenticator.idToken
+
         headers = headers or {}
         endpoint = self._build_endpoint_url(url, name)
 
