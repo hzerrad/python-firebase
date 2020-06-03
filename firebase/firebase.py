@@ -5,6 +5,8 @@ except ImportError:
     from urllib import parse as urlparse
 
 import json
+import threading
+
 from requests import Session
 
 from .firebase_authenticator import Authenticator, FireAuth
@@ -140,19 +142,24 @@ class FirebaseApplication(object):
     # == ASYNC == #
     
     def async_get(self, url, name, auth=True, params=None, headers=None):
-        pass
+        thread = threading.Thread(target=self.get, args=(url, name, auth, params, headers))
+        thread.start()
     
     def async_put(self, url, name, data, auth=True, params=None, headers=None):
-        pass
+        thread = threading.Thread(target=self.put, args=(url, name, data, auth, params, headers))
+        thread.start()
     
     def async_post(self, url, data, auth=True, params=None, headers=None):
-        pass
+        thread = threading.Thread(target=self.post, args=(url, data, auth, params, headers))
+        thread.start()
     
     def async_patch(self, url, data, auth=True, params=None, headers=None):
-        pass
+        thread = threading.Thread(target=self.patch, args=(url, data, auth, params, headers))
+        thread.start()
     
     def async_delete(self, url, name, auth=True, params=None, headers=None):
-        pass
+        thread = threading.Thread(target=self.delete, args=(url, name, auth, params, headers))
+        thread.start()
     
     def __prepare_request(self, url, name, params, headers):
         """
