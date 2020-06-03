@@ -1,9 +1,9 @@
-from requests import Session
+import requests
 from requests.auth import AuthBase
 import time
 
 
-class Authenticator(Session):
+class Authenticator(requests.Session):
     """
     Helper class that extends requests.Session to
     implements basic email/password Firebase authentication.
@@ -25,7 +25,7 @@ class Authenticator(Session):
 
     def __init__(self, apikey, email, password, signup_first=False, timeout=60):
         # Session
-        super(Session, self).__init__()
+        super(Authenticator, self).__init__()
         self.timeout = timeout
         self.headers.update({'Content-type': 'application/json'})
         self.token_expiry = None
@@ -55,46 +55,46 @@ class Authenticator(Session):
         if time.time() > self.token_expiry:
             self.__refresh()
             kwargs['auth'] = FireAuth(self.idToken)
-            super(Authenticator, self).get(url, **kwargs)
+            return super(Authenticator, self).get(url, **kwargs)
 
         else:
-            super(Authenticator, self).get(url, **kwargs)
+            return super(Authenticator, self).get(url, **kwargs)
 
     # Override
     def post(self, url, data=None, json=None, **kwargs):
         if time.time() > self.token_expiry:
             self.__refresh()
             kwargs['auth'] = FireAuth(self.idToken)
-            super(Authenticator, self).post(url, data, json, **kwargs)
+            return super(Authenticator, self).post(url, data, json, **kwargs)
         else:
-            super(Authenticator, self).post(url, data, json, **kwargs)
+            return super(Authenticator, self).post(url, data, json, **kwargs)
 
     # Override
     def put(self, url, data=None, **kwargs):
         if time.time() > self.token_expiry:
             self.__refresh()
             kwargs['auth'] = FireAuth(self.idToken)
-            super(Authenticator, self).put(url, data, **kwargs)
+            return super(Authenticator, self).put(url, data, **kwargs)
         else:
-            super(Authenticator, self).put(url, data, **kwargs)
+            return super(Authenticator, self).put(url, data, **kwargs)
 
     # Override
     def patch(self, url, data=None, **kwargs):
         if time.time() > self.token_expiry:
             self.__refresh()
             kwargs['auth'] = FireAuth(self.idToken)
-            super(Authenticator, self).patch(url, **kwargs)
+            return super(Authenticator, self).patch(url, **kwargs)
         else:
-            super(Authenticator, self).patch(url, **kwargs)
+            return super(Authenticator, self).patch(url, **kwargs)
 
     # Override
     def delete(self, url, **kwargs):
         if time.time() > self.token_expiry:
             self.__refresh()
             kwargs['auth'] = FireAuth(self.idToken)
-            super(Authenticator, self).delete(url, **kwargs)
+            return super(Authenticator, self).delete(url, **kwargs)
         else:
-            super(Authenticator, self).delete(url, **kwargs)
+            return super(Authenticator, self).delete(url, **kwargs)
 
     def __authenticate(self):
         """
@@ -116,7 +116,7 @@ class Authenticator(Session):
             }
 
         self.__set_tokens_or_fail(
-            self.post(Authenticator.SIGNIN_ENDPOINT + self.apikey, json=data)
+            super(Authenticator, self).post(Authenticator.SIGNIN_ENDPOINT + self.apikey, json=data)
         )
 
     def __signup(self):
@@ -137,7 +137,7 @@ class Authenticator(Session):
         self.__signup_first = False
 
         self.__set_tokens_or_fail(
-            self.post(Authenticator.SIGNUP_ENDPOINT + self.apikey, json=data)
+            super(Authenticator, self).post(Authenticator.SIGNUP_ENDPOINT + self.apikey, json=data)
         )
 
     def __refresh(self):
@@ -157,7 +157,7 @@ class Authenticator(Session):
         }
 
         self.__set_tokens_or_fail(
-            self.post(Authenticator.REFRESH_ENDPOINT + self.apikey, json=data)
+            super(Authenticator, self).post(Authenticator.REFRESH_ENDPOINT + self.apikey, json=data)
         )
 
     def __set_tokens_or_fail(self, response):

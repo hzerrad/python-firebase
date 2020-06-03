@@ -9,7 +9,6 @@ from requests import Session
 
 from .firebase_authenticator import Authenticator, FireAuth
 
-from .multiprocess_pool import process_pool
 from .jsonutil import JSONEncoder
 
 __all__ = ['FirebaseApplication']
@@ -86,15 +85,6 @@ class FirebaseApplication(object):
         endpoint, params, headers = self.__prepare_request(url, name, params, headers)
         return self.session.get(endpoint, params=params, headers=headers, auth=fireauth)
 
-    def get_async(self, url, name, auth=True, callback=None, params=None, headers=None):
-        """
-        Asynchronous GET request with the process pool.
-        """
-        args = self.__prepare_request(url, name, params, headers)
-
-        process_pool.apply_async(self.session.get,
-                                 args=args, callback=callback)
-
     def put(self, url, name, data, auth=True, params=None, headers=None):
         """
         Synchronous PUT request. There will be no returning output from
@@ -112,17 +102,6 @@ class FirebaseApplication(object):
 
         return self.session.put(endpoint, data=data, params=params, headers=headers, auth=fireauth)
 
-    def put_async(self, url, name, data, auth=True, callback=None, params=None, headers=None):
-        """
-        Asynchronous PUT request with the process pool.
-        """
-
-        endpoint, params, headers = self.__prepare_request(url, name, params, headers)
-        data = json.dumps(data, cls=JSONEncoder)
-        process_pool.apply_async(self.session.put,
-                                 args=(endpoint, data, params, headers),
-                                 callback=callback)
-
     def post(self, url, data, auth=True, params=None, headers=None):
         """
         Synchronous POST request. ``data`` must be a JSONable value.
@@ -134,16 +113,6 @@ class FirebaseApplication(object):
         endpoint, params, headers = self.__prepare_request(url, None, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
         return self.session.post(endpoint, data=data, params=params, headers=headers, auth=fireauth)
-
-    def post_async(self, url, data, auth=True, callback=None, params=None, headers=None):
-        """
-        Asynchronous POST request with the process pool.
-        """
-        endpoint, params, headers = self.__prepare_request(url, None, params, headers)
-        data = json.dumps(data, cls=JSONEncoder)
-        process_pool.apply_async(self.session.post,
-                                 args=(endpoint, data, params, headers),
-                                 callback=callback)
 
     def patch(self, url, data, auth=True, params=None, headers=None):
         """
@@ -157,17 +126,6 @@ class FirebaseApplication(object):
         data = json.dumps(data, cls=JSONEncoder)
         return self.session.patch(endpoint, data=data, params=params, headers=headers, auth=fireauth)
 
-    def patch_async(self, url, data, auth=True, callback=None, params=None, headers=None):
-        """
-        Asynchronous PATCH request with the process pool.
-        """
-
-        endpoint, params, headers = self.__prepare_request(url, None, params, headers)
-        data = json.dumps(data, cls=JSONEncoder)
-        process_pool.apply_async(self.session.patch,
-                                 args=(endpoint, data, params, headers),
-                                 callback=callback)
-
     def delete(self, url, name, auth=True, params=None, headers=None):
         """
         Synchronous DELETE request. ``data`` must be a JSONable value.
@@ -179,14 +137,23 @@ class FirebaseApplication(object):
         endpoint, params, headers = self.__prepare_request(url, name, params, headers)
         return self.session.delete(endpoint, params=params, headers=headers, auth=fireauth)
 
-    def delete_async(self, url, name, auth=True, callback=None, params=None, headers=None):
-        """
-        Asynchronous DELETE request with the process pool.
-        """
-        args = self.__prepare_request(url, name, params, headers)
-        process_pool.apply_async(self.session.delete,
-                                 args=args, callback=callback)
-
+    # == ASYNC == #
+    
+    def async_get(self, url, name, auth=True, params=None, headers=None):
+        pass
+    
+    def async_put(self, url, name, data, auth=True, params=None, headers=None):
+        pass
+    
+    def async_post(self, url, data, auth=True, params=None, headers=None):
+        pass
+    
+    def async_patch(self, url, data, auth=True, params=None, headers=None):
+        pass
+    
+    def async_delete(self, url, name, auth=True, params=None, headers=None):
+        pass
+    
     def __prepare_request(self, url, name, params, headers):
         """
         Prepare the request's url, headers and query strings.
