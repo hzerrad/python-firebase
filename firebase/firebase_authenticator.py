@@ -23,10 +23,9 @@ class Authenticator(requests.Session):
 
     PROVIDERS_ENDPOINT = 'https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key='
 
-    def __init__(self, apikey, email, password, signup_first=False, timeout=60):
+    def __init__(self, apikey, email, password, signup_first=False):
         # Session
         super(Authenticator, self).__init__()
-        self.timeout = timeout
         self.headers.update({'Content-type': 'application/json'})
         self.token_expiry = None
 
@@ -41,14 +40,14 @@ class Authenticator(requests.Session):
         self.idToken = None
         self.__refreshToken = None
 
-        # authenticate
-        self.__authenticate()
-
-    def set_timeout(self, timeout):
-        self.timeout = timeout
-
     def update_token_ttl(self):
-        self.token_expiry = time.time() + 3600
+        """
+            Sets the expiry time before a new Firebase Token is requested
+        """
+        self.token_expiry = time.time() + 3550
+
+    # Next methods are overridden from requests.Session
+    # With the added ability to request a new auth token when necessary
 
     # Override
     def get(self, url, **kwargs):
@@ -96,7 +95,7 @@ class Authenticator(requests.Session):
         else:
             return super(Authenticator, self).delete(url, **kwargs)
 
-    def __authenticate(self):
+    def authenticate(self):
         """
             Request an authentication token from Firebase.
                 - Sets `idToken` and `refreshToken` if ok
@@ -170,9 +169,18 @@ class Authenticator(requests.Session):
         """
         if response.ok:
             self.update_token_ttl()
-            self.localId = response.json()['localId']
-            self.idToken = response.json()['idToken']
-            self.__refreshToken = response.json()['refreshToken']
+
+            # Assign localId
+            localId = 'localId' if 'localId' in response.json().keys() else 'user_id'
+            self.localId = response.json()[localId]
+
+            # Assign idToken
+            idToken = 'idToken' if 'idToken' in response.json().keys() else 'id_token'
+            self.idToken = response.json()[idToken]
+
+            # Assign RefreshToken
+            refreshToken = 'refreshToken' if 'refreshToken' in response.json().keys() else 'refresh_token'
+            self.__refreshToken = response.json()[refreshToken]
         else:
             response.raise_for_status()
 

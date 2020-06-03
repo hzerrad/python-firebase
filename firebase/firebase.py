@@ -1,3 +1,5 @@
+import time
+
 try:
     import urlparse
 except ImportError:
@@ -85,7 +87,7 @@ class FirebaseApplication(object):
             else None
 
         endpoint, params, headers = self.__prepare_request(url, name, params, headers)
-        return self.session.get(endpoint, params=params, headers=headers, auth=fireauth)
+        return self.session.get(endpoint, auth=fireauth, params=params, headers=headers)
 
     def put(self, url, name, data, auth=True, params=None, headers=None):
         """
