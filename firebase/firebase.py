@@ -1,5 +1,3 @@
-import time
-
 try:
     import urlparse
 except ImportError:
@@ -8,8 +6,9 @@ except ImportError:
 
 import json
 import threading
+import Queue
 
-from requests import Session
+from requests import Session, ConnectionError
 
 from .firebase_authenticator import Authenticator, FireAuth
 
@@ -53,8 +52,8 @@ class FirebaseApplication(object):
     URL_SEPARATOR = '/'
 
     def __init__(self, apikey, project_id, email=None, password=None, signup_first=False):
-
         self.dsn = "https://{}.firebaseio.com".format(project_id)
+        self.buffer = Queue.Queue()
 
         if email is not None and password is not None:
             self.session = Authenticator(apikey, email, password, signup_first)
@@ -77,7 +76,7 @@ class FirebaseApplication(object):
         return '%s%s%s' % (urlparse.urljoin(self.dsn, url), name,
                            self.NAME_EXTENSION)
 
-    def get(self, url, name, auth=True, params=None, headers=None):
+    def get(self, url, name, auth=True, params=None, headers=None, in_thread=False):
         """
         Synchronous GET request.
         """
@@ -87,9 +86,15 @@ class FirebaseApplication(object):
             else None
 
         endpoint, params, headers = self.__prepare_request(url, name, params, headers)
-        return self.session.get(endpoint, auth=fireauth, params=params, headers=headers)
+        try:
+            return self.session.get(endpoint, params=params, headers=headers, auth=fireauth)
+        except ConnectionError, e:
+            if not in_thread:
+                raise e
+            else:
+                self.buffer.put(e)
 
-    def put(self, url, name, data, auth=True, params=None, headers=None):
+    def put(self, url, name, data, auth=True, params=None, headers=None, in_thread=False):
         """
         Synchronous PUT request. There will be no returning output from
         the server, because the request will be made with ``silent``
@@ -104,9 +109,16 @@ class FirebaseApplication(object):
         endpoint, params, headers = self.__prepare_request(url, name, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
 
-        return self.session.put(endpoint, data=data, params=params, headers=headers, auth=fireauth)
+        try:
+            return self.session.put(endpoint, data=data, params=params,
+                                    headers=headers, auth=fireauth)
+        except ConnectionError, e:
+            if not in_thread:
+                raise e
+            else:
+                self.buffer.put(e)
 
-    def post(self, url, data, auth=True, params=None, headers=None):
+    def post(self, url, data, auth=True, params=None, headers=None, in_thread=False):
         """
         Synchronous POST request. ``data`` must be a JSONable value.
         """
@@ -116,9 +128,16 @@ class FirebaseApplication(object):
 
         endpoint, params, headers = self.__prepare_request(url, None, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
-        return self.session.post(endpoint, data=data, params=params, headers=headers, auth=fireauth)
+        try:
+            return self.session.post(endpoint, data=data, params=params,
+                                     headers=headers, auth=fireauth)
+        except ConnectionError, e:
+            if not in_thread:
+                raise e
+            else:
+                self.buffer.put(e)
 
-    def patch(self, url, data, auth=True, params=None, headers=None):
+    def patch(self, url, data, auth=True, params=None, headers=None, in_thread=False):
         """
         Synchronous POST request. ``data`` must be a JSONable value.
         """
@@ -128,9 +147,17 @@ class FirebaseApplication(object):
 
         endpoint, params, headers = self.__prepare_request(url, None, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
-        return self.session.patch(endpoint, data=data, params=params, headers=headers, auth=fireauth)
 
-    def delete(self, url, name, auth=True, params=None, headers=None):
+        try:
+            return self.session.patch(endpoint, data=data, params=params,
+                                      headers=headers, auth=fireauth)
+        except ConnectionError, e:
+            if not in_thread:
+                raise e
+            else:
+                self.buffer.put(e)
+
+    def delete(self, url, name, auth=True, params=None, headers=None, in_thread=False):
         """
         Synchronous DELETE request. ``data`` must be a JSONable value.
         """
@@ -139,29 +166,41 @@ class FirebaseApplication(object):
             else None
 
         endpoint, params, headers = self.__prepare_request(url, name, params, headers)
-        return self.session.delete(endpoint, params=params, headers=headers, auth=fireauth)
+
+        try:
+            return self.session.delete(endpoint, params=params, headers=headers, auth=fireauth)
+        except ConnectionError, e:
+            if not in_thread:
+                raise e
+            else:
+                self.buffer.put(e)
 
     # == ASYNC == #
     
     def async_get(self, url, name, auth=True, params=None, headers=None):
-        thread = threading.Thread(target=self.get, args=(url, name, auth, params, headers))
+        thread = threading.Thread(target=self.get, args=(url, name, auth, params, headers, True))
         thread.start()
+        return thread
     
     def async_put(self, url, name, data, auth=True, params=None, headers=None):
-        thread = threading.Thread(target=self.put, args=(url, name, data, auth, params, headers))
+        thread = threading.Thread(target=self.put, args=(url, name, data, auth, params, headers, True))
         thread.start()
+        return thread
     
     def async_post(self, url, data, auth=True, params=None, headers=None):
-        thread = threading.Thread(target=self.post, args=(url, data, auth, params, headers))
+        thread = threading.Thread(target=self.post, args=(url, data, auth, params, headers, True))
         thread.start()
+        return thread
     
     def async_patch(self, url, data, auth=True, params=None, headers=None):
-        thread = threading.Thread(target=self.patch, args=(url, data, auth, params, headers))
+        thread = threading.Thread(target=self.patch, args=(url, data, auth, params, headers, True))
         thread.start()
+        return thread
     
     def async_delete(self, url, name, auth=True, params=None, headers=None):
-        thread = threading.Thread(target=self.delete, args=(url, name, auth, params, headers))
+        thread = threading.Thread(target=self.delete, args=(url, name, auth, params, headers, True))
         thread.start()
+        return thread
     
     def __prepare_request(self, url, name, params, headers):
         """
