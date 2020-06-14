@@ -8,9 +8,11 @@ import json
 import threading
 import Queue
 
-from requests import Session, ConnectionError
+from requests import Session
+from requests.exceptions import ReadTimeout, ConnectionError
 
 from .firebase_authenticator import Authenticator, FireAuth
+from .firebase_streaming import EventListener
 
 from .jsonutil import JSONEncoder
 
@@ -51,14 +53,29 @@ class FirebaseApplication(object):
     NAME_EXTENSION = '.json'
     URL_SEPARATOR = '/'
 
-    def __init__(self, apikey, project_id, email=None, password=None, signup_first=False):
+    def __init__(self, apikey, project_id, email=None, password=None, logger=None, signup_first=False):
         self.dsn = "https://{}.firebaseio.com".format(project_id)
+        self.logger = logger
         self.buffer = Queue.Queue()
 
         if email is not None and password is not None:
-            self.session = Authenticator(apikey, email, password, signup_first)
+            self.session = Authenticator(apikey, email, password, logger, signup_first)
         else:
             self.session = Session()
+
+    def __prepare_request(self, url, name, params, headers):
+        """
+        Prepare the request's url, headers and query strings.
+        """
+        if not name:
+            name = ''
+
+        params = params or {}
+
+        headers = headers or {}
+        endpoint = self._build_endpoint_url(url, name)
+
+        return endpoint, params, headers
 
     def _build_endpoint_url(self, url, name=None):
         """
@@ -76,6 +93,9 @@ class FirebaseApplication(object):
         return '%s%s%s' % (urlparse.urljoin(self.dsn, url), name,
                            self.NAME_EXTENSION)
 
+    ##############################################################################
+    #####                   A P I    R E Q U E S T S                         #####
+    ##############################################################################
     def get(self, url, name, auth=True, params=None, headers=None, in_thread=False):
         """
         Synchronous GET request.
@@ -87,8 +107,10 @@ class FirebaseApplication(object):
 
         endpoint, params, headers = self.__prepare_request(url, name, params, headers)
         try:
+            if self.logger is not None:
+                self.logger.info("GET {}".format(endpoint))
             return self.session.get(endpoint, params=params, headers=headers, auth=fireauth)
-        except ConnectionError, e:
+        except (ConnectionError, ReadTimeout) as e:
             if not in_thread:
                 raise e
             else:
@@ -110,9 +132,11 @@ class FirebaseApplication(object):
         data = json.dumps(data, cls=JSONEncoder)
 
         try:
+            if self.logger is not None:
+                self.logger.info("PUT {}".format(endpoint))
             return self.session.put(endpoint, data=data, params=params,
                                     headers=headers, auth=fireauth)
-        except ConnectionError, e:
+        except (ConnectionError, ReadTimeout) as e:
             if not in_thread:
                 raise e
             else:
@@ -129,9 +153,11 @@ class FirebaseApplication(object):
         endpoint, params, headers = self.__prepare_request(url, None, params, headers)
         data = json.dumps(data, cls=JSONEncoder)
         try:
+            if self.logger is not None:
+                self.logger.info("POST {}".format(endpoint))
             return self.session.post(endpoint, data=data, params=params,
                                      headers=headers, auth=fireauth)
-        except ConnectionError, e:
+        except (ConnectionError, ReadTimeout) as e:
             if not in_thread:
                 raise e
             else:
@@ -149,9 +175,11 @@ class FirebaseApplication(object):
         data = json.dumps(data, cls=JSONEncoder)
 
         try:
+            if self.logger is not None:
+                self.logger.info("PATCH {}".format(endpoint))
             return self.session.patch(endpoint, data=data, params=params,
                                       headers=headers, auth=fireauth)
-        except ConnectionError, e:
+        except (ConnectionError, ReadTimeout) as e:
             if not in_thread:
                 raise e
             else:
@@ -168,50 +196,74 @@ class FirebaseApplication(object):
         endpoint, params, headers = self.__prepare_request(url, name, params, headers)
 
         try:
+            if self.logger is not None:
+                self.logger.info("DELETE {}".format(endpoint))
             return self.session.delete(endpoint, params=params, headers=headers, auth=fireauth)
-        except ConnectionError, e:
+        except (ConnectionError, ReadTimeout) as e:
             if not in_thread:
                 raise e
             else:
                 self.buffer.put(e)
 
     # == ASYNC == #
-    
+
     def async_get(self, url, name, auth=True, params=None, headers=None):
         thread = threading.Thread(target=self.get, args=(url, name, auth, params, headers, True))
         thread.start()
         return thread
-    
+
     def async_put(self, url, name, data, auth=True, params=None, headers=None):
         thread = threading.Thread(target=self.put, args=(url, name, data, auth, params, headers, True))
         thread.start()
         return thread
-    
+
     def async_post(self, url, data, auth=True, params=None, headers=None):
         thread = threading.Thread(target=self.post, args=(url, data, auth, params, headers, True))
         thread.start()
         return thread
-    
+
     def async_patch(self, url, data, auth=True, params=None, headers=None):
         thread = threading.Thread(target=self.patch, args=(url, data, auth, params, headers, True))
         thread.start()
         return thread
-    
+
     def async_delete(self, url, name, auth=True, params=None, headers=None):
         thread = threading.Thread(target=self.delete, args=(url, name, auth, params, headers, True))
         thread.start()
         return thread
-    
-    def __prepare_request(self, url, name, params, headers):
+
+    ##############################################################################
+    #####                S T R E A M     L I S T E N E R                     #####
+    ##############################################################################
+
+    def subscribe(self, url, auth, callback):
         """
-        Prepare the request's url, headers and query strings.
+            subscribes a listener to the passed URL
+
+            Parameters:
+                url: string
+                    shortened url to the path
+                auth: bool
+                    indicates whether to use auth token or not
+                callback: function
+                    a function called upon each event
+
         """
-        if not name:
-            name = ''
+        endpoint = self._build_endpoint_url(url)
+        if auth and isinstance(self.session, Authenticator):
+            endpoint = endpoint + "?auth={}".format(self.session.idToken)
+            listener = EventListener(endpoint, callback)
+            if self.logger is not None:
+                marker = "?auth="
+                index = endpoint.find(marker)
+                shorturl = endpoint[0:index]
+                self.logger.info("Registered listener @ {}".format(shorturl))
+            self.session.listener_pool[endpoint] = listener
+            return listener
+        else:
+            listener = EventListener(url, callback)
+            if self.logger is not None:
+                self.logger.info("Registered listener @ {}".format(url))
+            return listener
 
-        params = params or {}
 
-        headers = headers or {}
-        endpoint = self._build_endpoint_url(url, name)
-
-        return endpoint, params, headers

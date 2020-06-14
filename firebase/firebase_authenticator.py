@@ -1,6 +1,15 @@
 import requests
-from requests.auth import AuthBase
+import threading
 import time
+from requests.auth import AuthBase
+from firebase_streaming import EventListener
+
+URL_SEPARATOR = '/'
+REFRESH_ENDPOINT = 'https://securetoken.googleapis.com/v1/token?key='
+SIGNUP_ENDPOINT = 'https://identitytoolkit.googleapis.com/v1/accounts:signUp?key='
+SIGNIN_ENDPOINT = 'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key='
+
+PROVIDERS_ENDPOINT = 'https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key='
 
 
 class Authenticator(requests.Session):
@@ -17,17 +26,14 @@ class Authenticator(requests.Session):
     SIGNIN_ENPOINT: string
         signs an existing user in using the passed email/password
     """
-    REFRESH_ENDPOINT = 'https://securetoken.googleapis.com/v1/token?key='
-    SIGNUP_ENDPOINT = 'https://identitytoolkit.googleapis.com/v1/accounts:signUp?key='
-    SIGNIN_ENDPOINT = 'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key='
 
-    PROVIDERS_ENDPOINT = 'https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key='
-
-    def __init__(self, apikey, email, password, signup_first=False):
+    def __init__(self, apikey, email, password, logger=None, signup_first=False):
         # Session
         super(Authenticator, self).__init__()
         self.headers.update({'Content-type': 'application/json'})
+        self.listener_pool = ListenerPool()
         self.token_expiry = None
+        self.watcher = None
 
         # User Info
         self.apikey = apikey
@@ -39,12 +45,7 @@ class Authenticator(requests.Session):
         # Tokens
         self.idToken = None
         self.__refreshToken = None
-
-    def update_token_ttl(self):
-        """
-            Sets the expiry time before a new Firebase Token is requested
-        """
-        self.token_expiry = time.time() + 3550
+        self.start_watcher(logger)
 
     # Next methods are overridden from requests.Session
     # With the added ability to request a new auth token when necessary
@@ -53,6 +54,7 @@ class Authenticator(requests.Session):
     def get(self, url, **kwargs):
         if time.time() > self.token_expiry:
             self.__refresh()
+            self.listener_pool.renewAll(self.idToken)
             kwargs['auth'] = FireAuth(self.idToken)
             return super(Authenticator, self).get(url, **kwargs)
 
@@ -63,6 +65,7 @@ class Authenticator(requests.Session):
     def post(self, url, data=None, json=None, **kwargs):
         if time.time() > self.token_expiry:
             self.__refresh()
+            self.listener_pool.renewAll(self.idToken)
             kwargs['auth'] = FireAuth(self.idToken)
             return super(Authenticator, self).post(url, data, json, **kwargs)
         else:
@@ -72,6 +75,7 @@ class Authenticator(requests.Session):
     def put(self, url, data=None, **kwargs):
         if time.time() > self.token_expiry:
             self.__refresh()
+            self.listener_pool.renewAll(self.idToken)
             kwargs['auth'] = FireAuth(self.idToken)
             return super(Authenticator, self).put(url, data, **kwargs)
         else:
@@ -81,6 +85,7 @@ class Authenticator(requests.Session):
     def patch(self, url, data=None, **kwargs):
         if time.time() > self.token_expiry:
             self.__refresh()
+            self.listener_pool.renewAll(self.idToken)
             kwargs['auth'] = FireAuth(self.idToken)
             return super(Authenticator, self).patch(url, **kwargs)
         else:
@@ -90,6 +95,7 @@ class Authenticator(requests.Session):
     def delete(self, url, **kwargs):
         if time.time() > self.token_expiry:
             self.__refresh()
+            self.listener_pool.renewAll(self.idToken)
             kwargs['auth'] = FireAuth(self.idToken)
             return super(Authenticator, self).delete(url, **kwargs)
         else:
@@ -115,7 +121,7 @@ class Authenticator(requests.Session):
             }
 
         self.__set_tokens_or_fail(
-            super(Authenticator, self).post(Authenticator.SIGNIN_ENDPOINT + self.apikey, json=data)
+            super(Authenticator, self).post(SIGNIN_ENDPOINT + self.apikey, json=data)
         )
 
     def __signup(self):
@@ -136,7 +142,7 @@ class Authenticator(requests.Session):
         self.__signup_first = False
 
         self.__set_tokens_or_fail(
-            super(Authenticator, self).post(Authenticator.SIGNUP_ENDPOINT + self.apikey, json=data)
+            super(Authenticator, self).post(SIGNUP_ENDPOINT + self.apikey, json=data)
         )
 
     def __refresh(self):
@@ -156,7 +162,7 @@ class Authenticator(requests.Session):
         }
 
         self.__set_tokens_or_fail(
-            super(Authenticator, self).post(Authenticator.REFRESH_ENDPOINT + self.apikey, json=data)
+            super(Authenticator, self).post(REFRESH_ENDPOINT + self.apikey, json=data)
         )
 
     def __set_tokens_or_fail(self, response):
@@ -184,6 +190,21 @@ class Authenticator(requests.Session):
         else:
             response.raise_for_status()
 
+    def update_token_ttl(self):
+        """
+            Sets the expiry time before a new Firebase Token is requested
+        """
+        self.token_expiry = time.time() + 3550
+
+    def start_watcher(self, logger):
+        self.watcher = _Watcher(self, logger)
+        self.watcher.setDaemon(True)
+        self.watcher.start()
+
+    def stop_watcher(self):
+        if self.watcher.isAlive():
+            self.watcher.stop()
+
 
 class FireAuth(AuthBase):
     """
@@ -196,3 +217,92 @@ class FireAuth(AuthBase):
     def __call__(self, r):
         r.prepare_url(r.url, {"auth": self.__idToken})
         return r
+
+
+class ListenerPool(dict):
+    """
+    Simple dictionary that holds listeners
+    with the ability to auto-renew
+    """
+    def __init__(self):
+        super(ListenerPool, self).__init__()
+
+    def renewAll(self, authKey=None):
+        ListenerPool.renew(self, authKey)
+
+    def renewByMarker(self, url_marker, authKey=None):
+        marked = {k: v for k, v in self if url_marker in k}
+        ListenerPool.renew(marked, authKey)
+
+    @staticmethod
+    def renew(listener_pool, authKey=None):
+        for url, listener in listener_pool.items():
+            if listener.remote_thread.isAlive():
+                listener.stop()
+            del listener_pool[url]
+            marker = "?auth="
+            index = url.find(marker)
+            if index > -1 and authKey is not None:
+                url = url[0:index] + "?auth={}".format(authKey)
+            listener = EventListener(url, listener.function)
+            listener.start()
+            listener_pool[url] = listener
+
+
+def connected():
+    try:
+        requests.get(SIGNIN_ENDPOINT)
+        return True
+    except requests.ConnectionError:
+        return False
+
+
+class _Watcher(threading.Thread):
+    """
+        Daemon that constantly watches listener threads in the background.
+    """
+    def __init__(self, session, logger=None):
+        self.session = session
+        self.logger = logger
+        super(_Watcher, self).__init__()
+
+    def logInfo(self, msg):
+        if self.logger is not None:
+            self.logger.info(msg)
+        else:
+            print "[INFO]: " + msg
+
+    def logDebug(self, msg):
+        if self.logger is not None:
+            self.logger.debug(msg)
+        else:
+            print "[DEBUG]: " + msg
+
+    def logError(self, msg):
+        if self.logger is not None:
+            self.logger.error(msg)
+        else:
+            print "[ERROR]: " + msg
+
+    def run(self):
+        self.logInfo("Watcher daemon started.")
+
+        while True:
+            if not connected():
+                for _, listener in self.session.listener_pool.items():
+                    if listener.remote_thread.isAlive():
+                        self.logInfo("No internet connection detected. Stopping listener @{}"
+                                     .format(listener.remote_thread.getName()))
+                        listener.stop()
+                time.sleep(5)
+                continue
+
+            if self.session.token_expiry > time.time():
+                for url, listener in self.session.listener_pool.items():
+                    assert isinstance(listener, EventListener)
+                    if not listener.remote_thread.isAlive():
+                        self.logInfo(listener.remote_thread.getName() + " perished. Restarting.")
+                        listener = EventListener(url, listener.function)
+                        listener.start()
+                        self.session.listener_pool[url] = listener
+            time.sleep(5)
