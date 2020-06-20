@@ -53,13 +53,14 @@ class FirebaseApplication(object):
     NAME_EXTENSION = '.json'
     URL_SEPARATOR = '/'
 
-    def __init__(self, apikey, project_id, email=None, password=None, logger=None, signup_first=False):
+    def __init__(self, apikey, project_id, email=None, password=None, logger=None, signup_first=False, timeout=15):
         self.dsn = "https://{}.firebaseio.com".format(project_id)
         self.logger = logger
         self.buffer = Queue.Queue()
+        self.timeout = timeout
 
         if email is not None and password is not None:
-            self.session = Authenticator(apikey, email, password, logger, signup_first)
+            self.session = Authenticator(apikey, email, password, logger, signup_first, timeout=timeout)
         else:
             self.session = Session()
 
@@ -92,6 +93,10 @@ class FirebaseApplication(object):
             name = ''
         return '%s%s%s' % (urlparse.urljoin(self.dsn, url), name,
                            self.NAME_EXTENSION)
+
+    @property
+    def listener(self):
+        return self.session.listener
 
     ##############################################################################
     #####                   A P I    R E Q U E S T S                         #####
@@ -249,19 +254,22 @@ class FirebaseApplication(object):
                     a function called upon each event
 
         """
+        if self.listener is not None and self.listener.remote_thread.isAlive():
+            self.listener.stop()
+
         endpoint = self._build_endpoint_url(url)
         if auth and isinstance(self.session, Authenticator):
             endpoint = endpoint + "?auth={}".format(self.session.idToken)
-            listener = EventListener(endpoint, callback)
+            listener = EventListener(endpoint, callback, self.logger)
             if self.logger is not None:
                 marker = "?auth="
                 index = endpoint.find(marker)
                 shorturl = endpoint[0:index]
                 self.logger.info("Registered listener @ {}".format(shorturl))
-            self.session.listener_pool[endpoint] = listener
+            self.session.listener = listener
             return listener
         else:
-            listener = EventListener(url, callback)
+            listener = EventListener(url, callback, self.logger)
             if self.logger is not None:
                 self.logger.info("Registered listener @ {}".format(url))
             return listener

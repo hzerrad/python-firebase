@@ -5,6 +5,7 @@ from sseclient import SSEClient
 import json
 import threading
 import socket
+from ssl import SSLSocket
 from urllib3.exceptions import ProtocolError
 import ast
 from requests import HTTPError
@@ -30,18 +31,21 @@ class ClosableSSEClient(SSEClient):
         self.should_connect = False
         self.retry = 0
         try:
-            self.resp.raw._fp.fp._sock.shutdown(socket.SHUT_RDWR)
-            self.resp.raw._fp.fp._sock.close()
+            sslsocket = self.resp.raw._fp.fp._sock
+            assert isinstance(sslsocket, SSLSocket)
+            sslsocket.shutdown(socket.SHUT_RDWR)
+            sslsocket.close()
         except AttributeError:
             pass
 
 
 class RemoteThread(threading.Thread):
 
-    def __init__(self, parent, URL, function):
+    def __init__(self, parent, URL, function, logger):
         self.sse = ClosableSSEClient(URL, chunk_size=1)
         self.function = function
         self.URL = URL
+        self.logger = logger
         self.parent = parent
         super(RemoteThread, self).__init__()
 
@@ -53,6 +57,9 @@ class RemoteThread(threading.Thread):
                     if msg_test is None:  # keep-alives
                         continue
                     msg_data = json_to_dict(msg.data)
+                    if self.logger is not None:
+                        self.logger.info(
+                            "\n Listener @{}:\nEVENT: {}\nDATA: {}".format(self.name, msg.event, msg.data))
                     self.function((msg.event, msg_data))
                 except ValueError:
                     print msg
@@ -68,11 +75,11 @@ class RemoteThread(threading.Thread):
 
 class EventListener:
 
-    def __init__(self, URL, function):
+    def __init__(self, URL, function, logger=None):
         self.cache = {}
         self.URL = URL
         self.function = function
-        self.remote_thread = RemoteThread(self, URL, function)
+        self.remote_thread = RemoteThread(self, URL, function, logger)
 
     def start(self):
         self.remote_thread.start()

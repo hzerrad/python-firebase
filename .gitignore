@@ -38,5 +38,6 @@ nosetests.xml
 .idea
 
 # Virtual Environment
+*.zip
 venv*
 main.py
