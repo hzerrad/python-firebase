@@ -120,7 +120,7 @@ class FirebaseListener(threading.Thread):
                 self.renew(self.__token)
         else:
             if self.logger is not None:
-                self.logger.warning('Listener is not asleep to be awakened. Ignoring')
+                self.logger.warning('Listener is already awake. Ignoring awaken() call.')
 
     def renew(self, token):
         """
@@ -129,8 +129,6 @@ class FirebaseListener(threading.Thread):
         if not self.is_asleep:
             self.sleep()
         url = self.url + "?auth={}".format(token)
-        print('turn off now')
-        self.join(5)
         try:
             self.listener = requests.get(url,
                                          headers={'Connection': "keep-alive", "Accept": "text/event-stream"},

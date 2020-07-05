@@ -210,7 +210,7 @@ class Authenticator(requests.Session):
         """
             Sets the expiry time before a new Firebase Token is requested
         """
-        self.token_expiry = time.time() + 5  # 200s failsafe measure
+        self.token_expiry = time.time() + 3400  # 200s failsafe measure
 
 
 class FireAuth(AuthBase):
