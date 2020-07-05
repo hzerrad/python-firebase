@@ -41,3 +41,4 @@ nosetests.xml
 *.zip
 venv*
 main.py
+*.log

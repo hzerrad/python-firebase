@@ -14,7 +14,6 @@ class FirebaseListener(threading.Thread):
         self.__token = token
         self.logger = logger
         self.is_asleep = False
-        self.__in_renewal = True
         if token:
             url += "?auth={}".format(token)
         try:
@@ -106,8 +105,9 @@ class FirebaseListener(threading.Thread):
         """
         Puts the listener to sleep.
         """
-        self.event.clear()
-        self.stop()
+        if not self.is_asleep:
+            self.event.clear()
+            self.stop()
 
     def awaken(self, token=None):
         """
