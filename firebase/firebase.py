@@ -12,7 +12,9 @@ from requests import Session
 from requests.exceptions import ReadTimeout, ConnectionError
 
 from .firebase_authenticator import Authenticator, FireAuth
-from .firebase_streaming import EventListener
+from .firebase_listener import FirebaseListener
+
+from threading import Event
 
 from .jsonutil import JSONEncoder
 
@@ -53,11 +55,12 @@ class FirebaseApplication(object):
     NAME_EXTENSION = '.json'
     URL_SEPARATOR = '/'
 
-    def __init__(self, apikey, project_id, email=None, password=None, logger=None, signup_first=False, timeout=15):
+    def __init__(self, apikey, project_id, email=None, password=None, logger=None, signup_first=False, timeout=4):
         self.dsn = "https://{}.firebaseio.com".format(project_id)
         self.logger = logger
         self.buffer = Queue.Queue()
         self.timeout = timeout
+        self.event = Event()
 
         if email is not None and password is not None:
             self.session = Authenticator(apikey, email, password, logger, signup_first, timeout=timeout)
@@ -113,7 +116,8 @@ class FirebaseApplication(object):
         endpoint, params, headers = self.__prepare_request(url, name, params, headers)
         try:
             if self.logger is not None:
-                self.logger.info("GET {}".format(endpoint))
+                shorturl = endpoint.split("?auth=", 1)
+                self.logger.info("GET {}".format(shorturl))
             return self.session.get(endpoint, params=params, headers=headers, auth=fireauth)
         except (ConnectionError, ReadTimeout) as e:
             if not in_thread:
@@ -138,7 +142,8 @@ class FirebaseApplication(object):
 
         try:
             if self.logger is not None:
-                self.logger.info("PUT {}".format(endpoint))
+                shorturl = endpoint.split("?auth=", 1)
+                self.logger.info("PUT {}".format(shorturl))
             return self.session.put(endpoint, data=data, params=params,
                                     headers=headers, auth=fireauth)
         except (ConnectionError, ReadTimeout) as e:
@@ -159,7 +164,8 @@ class FirebaseApplication(object):
         data = json.dumps(data, cls=JSONEncoder)
         try:
             if self.logger is not None:
-                self.logger.info("POST {}".format(endpoint))
+                shorturl = endpoint.split("?auth=", 1)
+                self.logger.info("POST {}".format(shorturl))
             return self.session.post(endpoint, data=data, params=params,
                                      headers=headers, auth=fireauth)
         except (ConnectionError, ReadTimeout) as e:
@@ -181,7 +187,8 @@ class FirebaseApplication(object):
 
         try:
             if self.logger is not None:
-                self.logger.info("PATCH {}".format(endpoint))
+                shorturl = endpoint.split("?auth=", 1)
+                self.logger.info("PATCH {}".format(shorturl))
             return self.session.patch(endpoint, data=data, params=params,
                                       headers=headers, auth=fireauth)
         except (ConnectionError, ReadTimeout) as e:
@@ -202,7 +209,8 @@ class FirebaseApplication(object):
 
         try:
             if self.logger is not None:
-                self.logger.info("DELETE {}".format(endpoint))
+                shorturl = endpoint.split("?auth=", 1)
+                self.logger.info("DELETE {}".format(shorturl))
             return self.session.delete(endpoint, params=params, headers=headers, auth=fireauth)
         except (ConnectionError, ReadTimeout) as e:
             if not in_thread:
@@ -241,26 +249,27 @@ class FirebaseApplication(object):
     #####                S T R E A M     L I S T E N E R                     #####
     ##############################################################################
 
-    def subscribe(self, url, auth, callback):
+    def subscribe(self, url, callback):
         """
             subscribes a listener to the passed URL
 
             Parameters:
                 url: string
                     shortened url to the path
-                auth: bool
-                    indicates whether to use auth token or not
                 callback: function
                     a function called upon each event
 
         """
-        if self.listener is not None and self.listener.remote_thread.isAlive():
+        if self.listener is not None and self.listener.isAlive():
             self.listener.stop()
 
         endpoint = self._build_endpoint_url(url)
-        if auth and isinstance(self.session, Authenticator):
-            endpoint = endpoint + "?auth={}".format(self.session.idToken)
-            listener = EventListener(endpoint, callback, self.logger)
+        self.event.set()
+
+        try:
+            assert isinstance(self.session, Authenticator)
+            listener = FirebaseListener(endpoint, callback, event=self.event,
+                                        token=self.session.idToken, logger=self.logger)
             if self.logger is not None:
                 marker = "?auth="
                 index = endpoint.find(marker)
@@ -268,10 +277,11 @@ class FirebaseApplication(object):
                 self.logger.info("Registered listener @ {}".format(shorturl))
             self.session.listener = listener
             return listener
-        else:
-            listener = EventListener(url, callback, self.logger)
-            if self.logger is not None:
-                self.logger.info("Registered listener @ {}".format(url))
+        except AssertionError:
+            listener = FirebaseListener(endpoint, callback, event=self.event, logger=self.logger)
+            self.logger.info("Registered listener @ {}".format(listener.url))
             return listener
+
+
 
 

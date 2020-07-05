@@ -1,8 +1,7 @@
 import requests
-import threading
 import time
 from requests.auth import AuthBase
-from firebase_streaming import EventListener
+from firebase_listener import FirebaseListener
 
 URL_SEPARATOR = '/'
 REFRESH_ENDPOINT = 'https://securetoken.googleapis.com/v1/token?key='
@@ -27,7 +26,7 @@ class Authenticator(requests.Session):
         signs an existing user in using the passed email/password
     """
 
-    def __init__(self, apikey, email, password, logger=None, signup_first=False, timeout=4):
+    def __init__(self, apikey, email, password, logger=None, signup_first=False, timeout=15):
         # Session
         super(Authenticator, self).__init__()
         self.timeout = timeout
@@ -191,28 +190,19 @@ class Authenticator(requests.Session):
             response.raise_for_status()
 
     def __renew_listener(self):
-        assert isinstance(self.listener, EventListener)
-        if self.listener.remote_thread.isAlive():
-            self.listener.stop()
-        marker = "?auth="
-        url = self.listener.URL
-        function = self.listener.function
-        index = url.find(marker)
-        if index > -1:
-            url = url[0:index] + "?auth={}".format(self.idToken)
+        assert isinstance(self.listener, FirebaseListener)
         if self.logger is not None:
-            self.logger.info('New token acquired. Renewing listener.')
+            self.logger.info("New token acquired. Renewing listener.")
         else:
-            print('[INFO]: New token acquired. Renewing listener.')
-
-        self.listener = EventListener(url, function, self.logger)
-        self.listener.start()
+            print("New token acquired. Renewing listener.")
+        if not self.listener.is_asleep:
+            self.listener.renew(self.idToken)
 
     def update_token_ttl(self):
         """
             Sets the expiry time before a new Firebase Token is requested
         """
-        self.token_expiry = time.time() + 3550
+        self.token_expiry = time.time() + 3400  # 200s failsafe measure
 
 
 class FireAuth(AuthBase):
