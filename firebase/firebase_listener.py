@@ -14,6 +14,7 @@ class FirebaseListener(threading.Thread):
         self.__token = token
         self.logger = logger
         self.is_asleep = False
+        self.__in_renewal = True
         if token:
             url += "?auth={}".format(token)
         try:
@@ -117,7 +118,6 @@ class FirebaseListener(threading.Thread):
                 self.renew(token)
             else:
                 self.renew(self.__token)
-            self.event.set()
         else:
             if self.logger is not None:
                 self.logger.warning('Listener is not asleep to be awakened. Ignoring')
@@ -129,26 +129,20 @@ class FirebaseListener(threading.Thread):
         if not self.is_asleep:
             self.sleep()
         url = self.url + "?auth={}".format(token)
-        print('Turn off now.')
-        time.sleep(3)
-        while True:
-            try:
-                self.is_asleep = False
-                self.listener = requests.get(url,
-                                             headers={'Connection': "keep-alive", "Accept": "text/event-stream"},
-                                             stream=True)
-                self.is_asleep = True
-                break
-            except requests.ConnectionError:
-                secs = 3
-                if self.logger is not None:
-                    self.logger.warning(
-                        "Failed registering listener with Firebase, retrying in {} seconds.".format(secs)
-                    )
-                else:
-                    print("Failed registering listener with Firebase, retrying in {} seconds.".format(secs))
-                self.join(3)
-        self.event.set()
+        print('turn off now')
+        self.join(5)
+        try:
+            self.listener = requests.get(url,
+                                         headers={'Connection': "keep-alive", "Accept": "text/event-stream"},
+                                         stream=True)
+            self.event.set()
+            return True
+        except (requests.ConnectionError, requests.exceptions.ReadTimeout), e:
+            if self.logger is not None:
+                self.logger.warning(
+                    "Failed registering listener with Firebase.\nReason: {}".format(e.__str__())
+                )
+            return False
 
     def stop(self):
         """

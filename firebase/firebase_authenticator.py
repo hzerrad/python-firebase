@@ -25,7 +25,6 @@ class Authenticator(requests.Session):
     SIGNIN_ENPOINT: string
         signs an existing user in using the passed email/password
     """
-
     def __init__(self, apikey, email, password, logger=None, signup_first=False, timeout=15):
         # Session
         super(Authenticator, self).__init__()
@@ -34,6 +33,7 @@ class Authenticator(requests.Session):
         self.listener = None
         self.logger = logger
         self.token_expiry = None
+        self.__should_renew = False
 
         # User Info
         self.apikey = apikey
@@ -56,18 +56,21 @@ class Authenticator(requests.Session):
             self.__renew_listener()
             kwargs['auth'] = FireAuth(self.idToken)
             return super(Authenticator, self).get(url, timeout=self.timeout, **kwargs)
-
         else:
+            if self.__should_renew:
+                self.__should_renew = not self.__renew_listener()
             return super(Authenticator, self).get(url, timeout=self.timeout, **kwargs)
 
     # Override
     def post(self, url, data=None, json=None, **kwargs):
         if time.time() > self.token_expiry:
             self.__refresh()
-            self.__renew_listener()
+            self.__should_renew = not self.__renew_listener()
             kwargs['auth'] = FireAuth(self.idToken)
             return super(Authenticator, self).post(url, data, json, timeout=self.timeout, **kwargs)
         else:
+            if self.__should_renew:
+                self.__should_renew = not self.__renew_listener()
             return super(Authenticator, self).post(url, data, json, timeout=self.timeout, **kwargs)
 
     # Override
@@ -78,6 +81,8 @@ class Authenticator(requests.Session):
             kwargs['auth'] = FireAuth(self.idToken)
             return super(Authenticator, self).put(url, data, timeout=self.timeout, **kwargs)
         else:
+            if self.__should_renew:
+                self.__should_renew = not self.__renew_listener()
             return super(Authenticator, self).put(url, data, timeout=self.timeout, **kwargs)
 
     # Override
@@ -88,6 +93,8 @@ class Authenticator(requests.Session):
             kwargs['auth'] = FireAuth(self.idToken)
             return super(Authenticator, self).patch(url, timeout=self.timeout, **kwargs)
         else:
+            if self.__should_renew:
+                self.__should_renew = not self.__renew_listener()
             return super(Authenticator, self).patch(url, timeout=self.timeout, **kwargs)
 
     # Override
@@ -98,6 +105,8 @@ class Authenticator(requests.Session):
             kwargs['auth'] = FireAuth(self.idToken)
             return super(Authenticator, self).delete(url, timeout=self.timeout, **kwargs)
         else:
+            if self.__should_renew:
+                self.__should_renew = not self.__renew_listener()
             return super(Authenticator, self).delete(url, timeout=self.timeout, **kwargs)
 
     def authenticate(self):
@@ -195,14 +204,13 @@ class Authenticator(requests.Session):
             self.logger.info("New token acquired. Renewing listener.")
         else:
             print("New token acquired. Renewing listener.")
-        if not self.listener.is_asleep:
             self.listener.renew(self.idToken)
 
     def update_token_ttl(self):
         """
             Sets the expiry time before a new Firebase Token is requested
         """
-        self.token_expiry = time.time() + 3400  # 200s failsafe measure
+        self.token_expiry = time.time() + 5  # 200s failsafe measure
 
 
 class FireAuth(AuthBase):
