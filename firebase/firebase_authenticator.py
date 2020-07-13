@@ -202,9 +202,8 @@ class Authenticator(requests.Session):
         assert isinstance(self.listener, FirebaseListener)
         if self.logger is not None:
             self.logger.info("New token acquired. Renewing listener.")
-        else:
-            print("New token acquired. Renewing listener.")
-            self.listener.renew(self.idToken)
+
+        self.listener.renew(self.idToken)
 
     def update_token_ttl(self):
         """

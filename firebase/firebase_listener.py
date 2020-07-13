@@ -16,16 +16,16 @@ class FirebaseListener(threading.Thread):
         self.is_asleep = False
         if token:
             url += "?auth={}".format(token)
+
         try:
             self.listener = requests.get(url,
                                          headers={'Connection': "keep-alive", "Accept": "text/event-stream"},
-                                         stream=True)
-        except requests.ConnectionError:
+                                         stream=True, timeout=(5, 5e5))
+        except requests.exceptions.ReadTimeout, requests.ConnectionError:
             if self.logger is not None:
-                self.logger.error("Listener: Could not connect to Firebase.")
-
+                self.logger.error("Listener: Could not connect to Firebase. Sleep is imminent.")
         if logger is not None:
-            logger.info("Listener launched @ {}".format(self.name))
+            logger.info("Listener launched @{}".format(self.name))
 
     def __parser(self):
         """
@@ -33,6 +33,7 @@ class FirebaseListener(threading.Thread):
         """
         event = dict()
         counter = 0
+        msg = ""
         try:
             for msg in self.listener.iter_lines(1):
                 if msg:
@@ -49,6 +50,7 @@ class FirebaseListener(threading.Thread):
             if self.logger is not None:
                 self.logger.error("Listener: invalid message format.",
                                   exc_info=True)
+                self.logger.error("msg: {}".format(msg))
             raise requests.exceptions.ChunkedEncodingError
         except requests.exceptions.StreamConsumedError:
             if self.logger is not None:
@@ -65,12 +67,9 @@ class FirebaseListener(threading.Thread):
                         self.callback(msg)
                     if self.logger is not None:
                         self.logger.info("{}\n{}".format(self.name, msg))
-
                     if msg['event'] == 'auth_revoked':
                         if self.logger is not None:
                             self.logger.warning("auth token expired, listener will sleep")
-                        else:
-                            print "[WARN]: auth token expired, listener will sleep"
                         self.event.clear()
                         break
             except requests.exceptions.ChunkedEncodingError:
@@ -82,23 +81,17 @@ class FirebaseListener(threading.Thread):
             if not self.event.is_set():
                 if self.logger is not None:
                     self.logger.info("Listener @{} is asleep.".format(self.name))
-                else:
-                    print "Listener @{} is asleep.".format(self.name)
                 self.is_asleep = True
                 self.event.wait()
                 self.is_asleep = False
                 if self.logger is not None:
                     self.logger.info("Listener @{} is awake.".format(self.name))
-                else:
-                    print "Listener @{} is awake.".format(self.name)
                 time.sleep(1)
 
             else:
                 self.is_asleep = True
                 if self.logger is not None:
                     self.logger.info("Listener @{} is terminated".format(self.name))
-                else:
-                    print "Listener @{} is terminated.".format(self.name)
                 break
 
     def sleep(self):
@@ -126,16 +119,24 @@ class FirebaseListener(threading.Thread):
         """
         Renews the authentication token.
         """
+        if not token:
+            if self.logger is not None:
+                self.logger.error('Listener: cannot renew without a token.')
+            return False
+
         if not self.is_asleep:
             self.sleep()
-        url = self.url + "?auth={}".format(token)
+
+        self.__token = token
+
+        url = self.url + "?auth={}".format(self.__token)
         try:
             self.listener = requests.get(url,
                                          headers={'Connection': "keep-alive", "Accept": "text/event-stream"},
-                                         stream=True)
+                                         stream=True, timeout=(5, 5e5))
             self.event.set()
             return True
-        except (requests.ConnectionError, requests.exceptions.ReadTimeout), e:
+        except (RuntimeError, requests.ConnectionError, requests.exceptions.ReadTimeout), e:
             if self.logger is not None:
                 self.logger.warning(
                     "Failed registering listener with Firebase.\nReason: {}".format(e.__str__())
@@ -151,4 +152,5 @@ class FirebaseListener(threading.Thread):
             s = socket.fromfd(self.listener.raw.fileno(), socket.AF_INET, socket.SOCK_STREAM)
             s.shutdown(socket.SHUT_RDWR)
         except Exception:
-            self.logger.warning("Socket shutdown failed.")
+            if self.logger is not None:
+                self.logger.warning("Socket shutdown failed.")
